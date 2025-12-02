@@ -19,13 +19,13 @@ st.markdown(
     """
 This dashboard summarizes **annual climate conditions and short-term trends**
 for weather stations in the **New York City metropolitan area** using a subset
-of the NOAA GSOM annual summaries (2020–2025).
+of NOAA GSOM annual summaries (2020–2025).
 
 Use the controls in the sidebar to:
 
-- Pick the year range used for summaries and trend calculations.  
-- Select the primary climate metric for comparisons.  
-- Choose specific stations to examine in more detail.
+- Pick the year range used for summaries and trend calculations  
+- Select the primary climate metric for comparisons  
+- Choose specific stations to examine in more detail
 """
 )
 
@@ -35,17 +35,42 @@ Use the controls in the sidebar to:
 @st.cache_data
 def load_data() -> pd.DataFrame:
     """
-    Load the cleaned annual dataset produced by the notebooks.
+    Load the cleaned annual dataset.
 
-    Expected columns (at minimum):
-    - STATION, NAME, DATE (year)
-    - TAVG, PRCP, SNOW
-    - LATITUDE, LONGITUDE (for map)
-    - heat_extreme_days, cold_extreme_days (if available)
+    It will try a couple of common paths so the app is a bit more robust:
+    - data/processed/noaa_nyc_annual_clean.csv
+    - data/noaa_nyc_annual_2020_2025.csv
+    - noaa_nyc_annual_2020_2025.csv
     """
-    df = pd.read_csv("data/processed/noaa_nyc_annual_clean.csv")
-    df["DATE"] = df["DATE"].astype(int)
-    return df
+    candidate_paths = [
+        "data/processed/noaa_nyc_annual_clean.csv",
+        "data/noaa_nyc_annual_2020_2025.csv",
+        "noaa_nyc_annual_2020_2025.csv",
+    ]
+
+    last_err = None
+    for path in candidate_paths:
+        try:
+            df_local = pd.read_csv(path)
+            df_local["DATE"] = df_local["DATE"].astype(int)
+            # Normalise a few possible column-name variants
+            rename_map = {}
+            if "TAVG_F" in df_local.columns and "TAVG" not in df_local.columns:
+                rename_map["TAVG_F"] = "TAVG"
+            if "PRCP_IN" in df_local.columns and "PRCP" not in df_local.columns:
+                rename_map["PRCP_IN"] = "PRCP"
+            if "SNOW_IN" in df_local.columns and "SNOW" not in df_local.columns:
+                rename_map["SNOW_IN"] = "SNOW"
+            if rename_map:
+                df_local = df_local.rename(columns=rename_map)
+            return df_local
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+
+    raise RuntimeError(
+        "Could not load climate data from any expected path. Last error was:\n"
+        f"{last_err}"
+    )
 
 
 df = load_data()
@@ -91,22 +116,23 @@ METRIC_CONFIG = {
     ),
 }
 
-# For PRCP we stored as "PRCP" in the CSV, not "PRCP, inches"
-metric_col_raw, metric_axis_label = METRIC_CONFIG[metric_label]
-metric_col = metric_col_raw.split(",")[0]  # "PRCP, inches" -> "PRCP"
+# small correction: PRCP column name should be PRCP, not "PRCP, inches"
+METRIC_CONFIG["Total precipitation (PRCP, inches)"] = ("PRCP", "Total precipitation (inches)")
+
+metric_col, metric_axis_label = METRIC_CONFIG[metric_label]
 
 # Filter years
 mask_years = (df["DATE"] >= year_range[0]) & (df["DATE"] <= year_range[1])
 df_filt = df.loc[mask_years].copy()
 
+# Some metrics may not exist in the file (e.g., heat_extreme_days)
 if metric_col not in df_filt.columns:
-    st.error(
-        f"Column **`{metric_col}`** is not present in `noaa_nyc_annual_clean.csv`.\n\n"
-        "Switch to another metric or add this column in your preprocessing step."
+    st.warning(
+        f"Column **`{metric_col}`** is not present in the dataset.\n\n"
+        "Switch to TAVG, PRCP, or SNOW, or add this column in your preprocessing step."
     )
-    st.stop()
 
-# default stations (Central Park + a couple more)
+# default stations: Central Park if present, otherwise first three
 stations_default = [
     s for s in stations_all if "CENTRAL PARK" in s
 ] or list(stations_all[:3])
@@ -140,22 +166,27 @@ def compute_station_trends(df_years: pd.DataFrame, col: str) -> pd.DataFrame:
     Fit a linear trend for each station for the chosen metric over the given years.
     Returns one row per station with a `slope` column (units of metric per year).
     """
+    records: list[dict] = []
 
-    def slope_for_group(g: pd.DataFrame) -> float:
+    for (station_id, name), g in df_years.groupby(["STATION", "NAME"]):
         g = g.dropna(subset=[col])
         if g.shape[0] < 3:
-            return np.nan
-        x = g["DATE"].values.astype(float)
-        y = g[col].values.astype(float)
-        m, _ = np.polyfit(x, y, 1)
-        return m
+            slope = np.nan
+        else:
+            x = g["DATE"].values.astype(float)
+            y = g[col].values.astype(float)
+            m, _ = np.polyfit(x, y, 1)
+            slope = float(m)
 
-    trend = (
-        df_years.groupby(["STATION", "NAME"], as_index=False)
-        .apply(slope_for_group)
-        .rename(columns={0: "slope"})
-    )
-    return trend
+        records.append(
+            {
+                "STATION": station_id,
+                "NAME": name,
+                "slope": slope,
+            }
+        )
+
+    return pd.DataFrame.from_records(records)
 
 
 # -----------------------------------------------------------------------------
@@ -164,9 +195,9 @@ def compute_station_trends(df_years: pd.DataFrame, col: str) -> pd.DataFrame:
 st.subheader("Overview for selected period")
 
 metro_series = df_filt.groupby("DATE", as_index=False)[metric_col].mean()
-metro_mean = metro_series[metric_col].mean()
-metro_first = metro_series.loc[metro_series["DATE"].idxmin(), metric_col]
-metro_last = metro_series.loc[metro_series["DATE"].idxmax(), metric_col]
+metro_mean = float(metro_series[metric_col].mean())
+metro_first = float(metro_series.loc[metro_series["DATE"].idxmin(), metric_col])
+metro_last = float(metro_series.loc[metro_series["DATE"].idxmax(), metric_col])
 delta_val = metro_last - metro_first
 
 col1, col2, col3 = st.columns(3)
@@ -176,7 +207,7 @@ col1.metric(
 )
 col2.metric(
     f"Change in metro mean ({year_range[0]} → {year_range[1]})",
-    f"{delta_val:+.2f} per period",
+    f"{delta_val:+.2f} over period",
 )
 col3.metric(
     "Number of stations with data",
@@ -218,6 +249,7 @@ with rank_col1:
             f"Top {top_n} stations by {metric_axis_label.lower()} "
             f"({year_range[0]}–{year_range[1]})"
         ),
+        hover_data={metric_col: ":.2f", "delta_vs_metro": ":+.2f"},
     )
     fig_rank.add_vline(
         x=metro_mean,
@@ -234,11 +266,11 @@ with rank_col2:
         """
 **How to read this chart**
 
-- Bars show the **mean value** for each station over the selected years.
-- Colour encodes how far each station is from the **metro-wide mean**:
-  - values above the mean are warmer/wetter/snowier (red shades),
-  - values below the mean are cooler/drier (blue shades).
-- The dashed vertical line marks the metro average.
+- Bars show the **mean value** for each station over the selected years  
+- Colour encodes how far each station is from the **metro-wide mean**:  
+  - values above the mean are warmer/wetter/snowier (red shades)  
+  - values below the mean are cooler/drier (blue shades)  
+- The dashed vertical line marks the metro average  
 
 This gives a quick sense of which locations are systematic **hot spots**
 or **cold spots** for the chosen metric.
@@ -256,11 +288,9 @@ if not selected_stations:
     st.info("Select at least one station in the sidebar to see time series.")
 else:
     df_ts = df_filt[df_filt["NAME"].isin(selected_stations)].copy()
-
     # metro mean as an additional "station"
     metro_series_long = metro_series.copy()
     metro_series_long["NAME"] = "Metro mean (all stations)"
-
     df_ts_long = pd.concat(
         [
             df_ts[["DATE", "NAME", metric_col]],
@@ -296,130 +326,179 @@ st.markdown("---")
 st.subheader(f"Short-term trends in {metric_axis_label.lower()}")
 
 trend_df = compute_station_trends(df_filt, metric_col)
-trend_valid = trend_df.dropna(subset=["slope"])
 
-if trend_valid.empty:
-    st.info(
-        "Not enough non-missing data to compute station-level trends for this "
-        "metric and year range."
-    )
+if "slope" not in trend_df.columns:
+    st.error("Internal error: trend dataframe has no 'slope' column.")
 else:
-    warmest_trend = (
-        trend_valid.nlargest(top_n, "slope").sort_values("slope")
-    )
+    trend_valid = trend_df.dropna(subset=["slope"])
 
-    trend_col1, trend_col2 = st.columns([3, 2])
+    if trend_valid.empty:
+        st.info(
+            "Not enough non-missing data to compute station-level trends for this "
+            "metric and year range."
+        )
+    else:
+        warmest_trend = (
+            trend_valid.nlargest(top_n, "slope").sort_values("slope")
+        )
 
-    with trend_col1:
-        fig_trend_rank = px.bar(
-            warmest_trend,
+        trend_col1, trend_col2 = st.columns([3, 2])
+
+        with trend_col1:
+            fig_trend_rank = px.bar(
+                warmest_trend,
+                x="slope",
+                y="NAME",
+                orientation="h",
+                color="slope",
+                color_continuous_scale="Reds",
+                labels={
+                    "NAME": "Station",
+                    "slope": f"Trend in {metric_axis_label.lower()} per year",
+                },
+                title=(
+                    f"Stations with strongest upward trend in "
+                    f"{metric_axis_label.lower()} ({year_range[0]}–{year_range[1]})"
+                ),
+            )
+            fig_trend_rank.add_vline(
+                x=0,
+                line_dash="dash",
+                line_color="white",
+                annotation_text="No trend",
+                annotation_position="top left",
+            )
+            fig_trend_rank.update_layout(
+                height=550, margin=dict(l=10, r=10, t=60, b=10)
+            )
+            st.plotly_chart(fig_trend_rank, use_container_width=True)
+
+        with trend_col2:
+            st.markdown(
+                """
+**What this shows**
+
+- Each bar is the **slope of a linear regression** of the chosen metric vs. year  
+  for one station  
+- Positive slopes indicate **increasing** values over the period  
+  (warming, wetter conditions, more hot days, etc.)  
+- The dashed vertical line at 0 marks “no trend”  
+
+Because we only have **six years of data**, these slopes should be interpreted
+as **short-term signals** rather than robust long-term climate trends.
+"""
+            )
+
+        fig_hist = px.histogram(
+            trend_valid,
             x="slope",
-            y="NAME",
-            orientation="h",
-            color="slope",
-            color_continuous_scale="Reds",
-            labels={
-                "NAME": "Station",
-                "slope": f"Trend in {metric_axis_label.lower()} per year",
-            },
+            nbins=20,
+            labels={"slope": f"Trend in {metric_axis_label.lower()} per year"},
             title=(
-                f"Stations with strongest upward trend in "
-                f"{metric_axis_label.lower()} ({year_range[0]}–{year_range[1]})"
+                f"Distribution of station-level trends in "
+                f"{metric_axis_label.lower()}"
             ),
         )
-        fig_trend_rank.add_vline(
+        fig_hist.add_vline(
             x=0,
             line_dash="dash",
             line_color="white",
             annotation_text="No trend",
             annotation_position="top left",
         )
-        fig_trend_rank.update_layout(height=550, margin=dict(l=10, r=10, t=60, b=10))
-        st.plotly_chart(fig_trend_rank, use_container_width=True)
-
-    with trend_col2:
-        st.markdown(
-            """
-**What this shows**
-
-- Each bar is the **slope of a linear regression** of the chosen metric vs. year
-  for one station.
-- Positive slopes indicate **increasing** values over the period
-  (warming, wetter conditions, more hot days, etc.).
-- The dashed vertical line at 0 marks "no trend".
-
-Because we only have **six years of data**, these slopes should be interpreted
-as **short-term signals** rather than robust long-term climate trends.
-"""
-        )
-
-    # Distribution of slopes
-    fig_hist = px.histogram(
-        trend_valid,
-        x="slope",
-        nbins=20,
-        labels={"slope": f"Trend in {metric_axis_label.lower()} per year"},
-        title=f"Distribution of station-level trends in {metric_axis_label.lower()}",
-    )
-    fig_hist.add_vline(
-        x=0,
-        line_dash="dash",
-        line_color="white",
-        annotation_text="No trend",
-        annotation_position="top left",
-    )
-    fig_hist.update_layout(height=400, margin=dict(l=10, r=10, t=60, b=10))
-    st.plotly_chart(fig_hist, use_container_width=True)
+        fig_hist.update_layout(height=400, margin=dict(l=10, r=10, t=60, b=10))
+        st.plotly_chart(fig_hist, use_container_width=True)
 
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 5. Spatial patterns: map of station anomalies
+# 5. Geographic patterns – map view
 # -----------------------------------------------------------------------------
-st.subheader("Spatial patterns across the metro area")
+st.subheader("Geographic pattern of station conditions")
 
-has_geo = {"LATITUDE", "LONGITUDE"}.issubset(station_summary.columns)
+# Try to find latitude / longitude columns
+lat_col = None
+lon_col = None
+for c in ["LATITUDE", "Latitude", "lat", "LAT"]:
+    if c in df_filt.columns:
+        lat_col = c
+        break
+for c in ["LONGITUDE", "Longitude", "lon", "LON"]:
+    if c in df_filt.columns:
+        lon_col = c
+        break
 
-if not has_geo:
+if lat_col is None or lon_col is None:
     st.info(
-        "Latitude/longitude columns are missing, so a station map "
-        "cannot be displayed for this dataset."
+        "Latitude/longitude columns were not found in the dataset, "
+        "so the map view is disabled."
     )
 else:
-    center_lat = station_summary["LATITUDE"].mean()
-    center_lon = station_summary["LONGITUDE"].mean()
+    # Aggregate to one row per station for the selected years
+    station_map = (
+        df_filt.groupby(["STATION", "NAME"], as_index=False)
+        .agg(
+            {
+                metric_col: "mean",
+                lat_col: "first",
+                lon_col: "first",
+            }
+        )
+        .rename(columns={lat_col: "LAT", lon_col: "LON"})
+    )
+    station_map["delta_vs_metro"] = station_map[metric_col] - metro_mean
 
-    # Build hover_data dynamically so we only reference columns that exist
-    hover_data = {
-        metric_col: ":.2f",
-        "delta_vs_metro": ":+.2f",
-    }
-    if "ELEVATION" in station_summary.columns:
-        hover_data["ELEVATION"] = True
+    center_lat = float(station_map["LAT"].mean())
+    center_lon = float(station_map["LON"].mean())
 
     fig_map = px.scatter_mapbox(
-        station_summary,
-        lat="LATITUDE",
-        lon="LONGITUDE",
-        size=np.maximum(
-            station_summary[metric_col] - station_summary[metric_col].min(), 0.1
-        ),
-        size_max=18,
+        station_map,
+        lat="LAT",
+        lon="LON",
+        size=metric_col,
         color="delta_vs_metro",
         color_continuous_scale="RdBu_r",
-        color_continuous_midpoint=0,
-        hover_name="NAME",
-        hover_data=hover_data,
-        title=(
-            f"Station locations coloured by anomaly vs metro mean "
-            f"({metric_axis_label}, {year_range[0]}–{year_range[1]})"
-        ),
+        size_max=30,
         zoom=7,
-        center={"lat": center_lat, "lon": center_lon},
+        hover_name="NAME",
+        hover_data={
+            metric_col: ":.2f",
+            "delta_vs_metro": ":+.2f",
+            "LAT": False,
+            "LON": False,
+        },
+        labels={
+            metric_col: metric_axis_label,
+            "delta_vs_metro": f"Δ vs metro mean ({metric_axis_label})",
+        },
+        title=(
+            f"Spatial distribution of {metric_axis_label.lower()} "
+            f"({year_range[0]}–{year_range[1]})"
+        ),
     )
     fig_map.update_layout(
-        mapbox_style="carto-positron",
-        height=550,
+        mapbox_style="open-street-map",
+        mapbox_center={"lat": center_lat, "lon": center_lon},
+        height=600,
         margin=dict(l=10, r=10, t=60, b=10),
     )
-    st.plotly_chart(fig_map, use_container_width=True)
+
+    map_col1, map_col2 = st.columns([3, 2])
+
+    with map_col1:
+        st.plotly_chart(fig_map, use_container_width=True)
+
+    with map_col2:
+        st.markdown(
+            """
+**How to read this map**
+
+- Each point is a **weather station** in the NYC metropolitan area  
+- Marker **size** shows the mean value of the selected metric over the chosen years  
+- Marker **colour** shows how far the station is from the **metro-wide mean**  
+  (red = above average, blue = below average)  
+
+This helps you see whether hot/wet/snowy outliers are spatially clustered or
+spread across the region.
+"""
+        )
