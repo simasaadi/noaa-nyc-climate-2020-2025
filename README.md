@@ -3,6 +3,10 @@ Exploratory climate analysis of NOAA GSOM annual summaries for the NYC metro are
 
 NOAA NYC Climate Explorer (2020–2025)
 This project analyzes short-term climate conditions and trends across weather stations in the New York City metropolitan area using annual summaries from the NOAA GSOM dataset (2020–2025).
+🚀 Live Dashboard
+
+Click above to open the fully interactive NYC climate dashboard.
+
 It combines a clean end-to-end workflow:
 
 Reproducible data cleaning
