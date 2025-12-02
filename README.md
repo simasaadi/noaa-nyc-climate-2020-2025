@@ -8,22 +8,19 @@ This project analyzes short-term climate conditions and trends across weather st
 
 [![Streamlit App](https://img.shields.io/badge/Streamlit-Live%20App-red?logo=streamlit)](https://noaa-nyc-climate-2020-2025-7oa3p73mp5j3uxpeawrxnm.streamlit.app/)
 
+Click the button above to open the fully interactive NYC climate dashboard.
 
 It combines a clean end-to-end workflow:
 
-Reproducible data cleaning
+- Reproducible data cleaning  
+- Exploratory analysis notebooks  
+- Station-level climate profiling  
+- Trend estimation  
+- A full interactive Streamlit dashboard  
+- Clear documentation  
 
-Exploratory analysis notebooks
+The result is a compact but professional climate-intelligence tool that helps identify hot spots, wet spots, outliers, and short-term warming signals across the NYC metro area.
 
-Station-level climate profiling
-
-Trend estimation
-
-A full interactive Streamlit dashboard
-
-Clear documentation
-
-The result is a compact but professional climate-intelligence tool that helps identify hot spots, wet spots, outliers, and short-term warming signals across the metro area.
 
 Project Overview
 
