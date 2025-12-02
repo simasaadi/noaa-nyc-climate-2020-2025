@@ -39,11 +39,11 @@ def load_data() -> pd.DataFrame:
 
     Expected columns (at minimum):
     - STATION, NAME, DATE (year)
+    - LATITUDE, LONGITUDE, ELEVATION
     - TAVG, PRCP, SNOW
     - heat_extreme_days, cold_extreme_days (if available)
     """
     df = pd.read_csv("data/processed/noaa_nyc_annual_clean.csv")
-    # Make sure DATE is numeric
     df["DATE"] = df["DATE"].astype(int)
     return df
 
@@ -90,16 +90,19 @@ metric_col, metric_axis_label = METRIC_CONFIG[metric_label]
 mask_years = (df["DATE"] >= year_range[0]) & (df["DATE"] <= year_range[1])
 df_filt = df.loc[mask_years].copy()
 
-# Some metrics may not exist in the file (e.g., heat_extreme_days)
-if metric_col not in df_filt.columns:
-    st.warning(
-        f"Column **`{metric_col}`** is not present in `noaa_nyc_annual_clean.csv`.\n\n"
-        "Switch to TAVG, PRCP, or SNOW, or add this column in your preprocessing step."
-    )
+if df_filt.empty:
+    st.error("No data in the selected year range.")
+    st.stop()
 
-stations_default = [
-    s for s in stations_all if "CENTRAL PARK" in s
-] or list(stations_all[:3])
+# Guard: metric column might not exist (e.g. extremes if you didn’t compute them)
+if metric_col not in df_filt.columns:
+    st.error(
+        f"Column **`{metric_col}`** is not present in `noaa_nyc_annual_clean.csv`.\n\n"
+        "Switch to **TAVG**, **PRCP**, or **SNOW**, or add this metric in your preprocessing step."
+    )
+    st.stop()
+
+stations_default = [s for s in stations_all if "CENTRAL PARK" in s] or list(stations_all[:3])
 
 selected_stations = st.sidebar.multiselect(
     "Stations for detailed exploration",
@@ -130,6 +133,7 @@ def compute_station_trends(df_years: pd.DataFrame, col: str) -> pd.DataFrame:
     Fit a linear trend for each station for the chosen metric over the given years.
     Returns one row per station with a `slope` column (units of metric per year).
     """
+
     def slope_for_group(g: pd.DataFrame) -> float:
         g = g.dropna(subset=[col])
         if g.shape[0] < 3:
@@ -139,24 +143,23 @@ def compute_station_trends(df_years: pd.DataFrame, col: str) -> pd.DataFrame:
         m, _ = np.polyfit(x, y, 1)
         return m
 
-    trend = (
-        df_years.groupby(["STATION", "NAME"], as_index=False)
-        .apply(slope_for_group)
-        .rename(columns={0: "slope"})
-    )
-    return trend
+    # groupby + apply returns a Series; convert to a clean DataFrame
+    trend_series = df_years.groupby(["STATION", "NAME"]).apply(slope_for_group)
+    trend_df = trend_series.reset_index(name="slope")
+    return trend_df
 
 
-# -----------------------------------------------------------------------------
-# 1. Overview KPIs
-# -----------------------------------------------------------------------------
-st.subheader("Overview for selected period")
-
+# Precompute metro time series for the selected metric
 metro_series = df_filt.groupby("DATE", as_index=False)[metric_col].mean()
 metro_mean = metro_series[metric_col].mean()
 metro_first = metro_series.loc[metro_series["DATE"].idxmin(), metric_col]
 metro_last = metro_series.loc[metro_series["DATE"].idxmax(), metric_col]
 delta_val = metro_last - metro_first
+
+# -----------------------------------------------------------------------------
+# 1. Overview KPIs
+# -----------------------------------------------------------------------------
+st.subheader("Overview for selected period")
 
 col1, col2, col3 = st.columns(3)
 col1.metric(
@@ -175,14 +178,67 @@ col3.metric(
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 2. Ranking: Top N stations by metric
+# 2. Spatial patterns: map of stations and anomalies
 # -----------------------------------------------------------------------------
-st.subheader(f"Station rankings by {metric_axis_label.lower()}")
+st.subheader("Spatial patterns in the selected metric")
+
+has_geo = all(c in df_filt.columns for c in ["LATITUDE", "LONGITUDE"])
+
+# Aggregate per station (mean over selected years, plus location info)
+agg_dict = {metric_col: "mean"}
+if has_geo:
+    agg_dict.update({"LATITUDE": "first", "LONGITUDE": "first"})
+if "ELEVATION" in df_filt.columns:
+    agg_dict["ELEVATION"] = "first"
 
 station_summary = (
-    df_filt.groupby(["STATION", "NAME"], as_index=False)[metric_col].mean()
+    df_filt.groupby(["STATION", "NAME"], as_index=False)
+    .agg(agg_dict)
 )
+
 station_summary["delta_vs_metro"] = station_summary[metric_col] - metro_mean
+
+if has_geo:
+    center_lat = station_summary["LATITUDE"].mean()
+    center_lon = station_summary["LONGITUDE"].mean()
+
+    fig_map = px.scatter_mapbox(
+        station_summary,
+        lat="LATITUDE",
+        lon="LONGITUDE",
+        size=np.maximum(station_summary[metric_col] - station_summary[metric_col].min(), 0.1),
+        size_max=18,
+        color="delta_vs_metro",
+        color_continuous_scale="RdBu_r",
+        color_continuous_midpoint=0,
+        hover_name="NAME",
+        hover_data={
+            metric_col: ":.2f",
+            "delta_vs_metro": ":+.2f",
+            "ELEVATION": True if "ELEVATION" in station_summary.columns else False,
+        },
+        title=(
+            f"Station locations coloured by anomaly vs metro mean "
+            f"({metric_axis_label}, {year_range[0]}–{year_range[1]})"
+        ),
+        zoom=7,
+        center={"lat": center_lat, "lon": center_lon},
+    )
+    fig_map.update_layout(
+        mapbox_style="carto-positron",
+        height=550,
+        margin=dict(l=10, r=10, t=60, b=10),
+    )
+    st.plotly_chart(fig_map, use_container_width=True)
+else:
+    st.info("Latitude/longitude columns not found, so the map is skipped.")
+
+st.markdown("---")
+
+# -----------------------------------------------------------------------------
+# 3. Ranking: Top N stations by metric (advanced bar with anomalies)
+# -----------------------------------------------------------------------------
+st.subheader(f"Station rankings by {metric_axis_label.lower()}")
 
 top_ranked = (
     station_summary.nlargest(top_n, metric_col).sort_values(metric_col)
@@ -198,6 +254,7 @@ with rank_col1:
         orientation="h",
         color="delta_vs_metro",
         color_continuous_scale="RdBu_r",
+        color_continuous_midpoint=0,
         labels={
             "NAME": "Station",
             metric_col: metric_axis_label,
@@ -238,42 +295,82 @@ or **cold spots** for the chosen metric.
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 3. Time series for selected stations + metro mean
+# 4. Time series for selected stations + anomaly view
 # -----------------------------------------------------------------------------
 st.subheader("Year-to-year evolution")
 
 if not selected_stations:
     st.info("Select at least one station in the sidebar to see time series.")
 else:
+    # Data for selected stations
     df_ts = df_filt[df_filt["NAME"].isin(selected_stations)].copy()
-    # metro mean as an additional "station"
+
+    # Merge metro mean to compute anomalies
+    metro_for_merge = metro_series.rename(columns={metric_col: "metro_mean"})
+    df_ts = df_ts.merge(metro_for_merge, on="DATE", how="left")
+    df_ts["anomaly"] = df_ts[metric_col] - df_ts["metro_mean"]
+
+    # Absolute values with metro mean as an extra "station"
     metro_series_long = metro_series.copy()
     metro_series_long["NAME"] = "Metro mean (all stations)"
-    df_ts_long = pd.concat(
-        [df_ts[["DATE", "NAME", metric_col]], metro_series_long[["DATE", "NAME", metric_col]]],
+    df_ts_abs = pd.concat(
+        [
+            df_ts[["DATE", "NAME", metric_col]],
+            metro_series_long[["DATE", "NAME", metric_col]],
+        ],
         ignore_index=True,
     )
 
-    fig_ts = px.line(
-        df_ts_long,
-        x="DATE",
-        y=metric_col,
-        color="NAME",
-        markers=True,
-        labels={
-            "DATE": "Year",
-            "NAME": "Station",
-            metric_col: metric_axis_label,
-        },
-        title=f"{metric_axis_label} by year for selected stations ({year_range[0]}–{year_range[1]})",
-    )
-    fig_ts.update_layout(height=500, margin=dict(l=10, r=10, t=60, b=10))
-    st.plotly_chart(fig_ts, use_container_width=True)
+    abs_col, anom_col = st.columns(2)
+
+    with abs_col:
+        fig_ts_abs = px.line(
+            df_ts_abs,
+            x="DATE",
+            y=metric_col,
+            color="NAME",
+            markers=True,
+            labels={
+                "DATE": "Year",
+                "NAME": "Station",
+                metric_col: metric_axis_label,
+            },
+            title=f"{metric_axis_label} by year for selected stations ({year_range[0]}–{year_range[1]})",
+        )
+        fig_ts_abs.update_layout(height=500, margin=dict(l=10, r=10, t=60, b=10))
+        st.plotly_chart(fig_ts_abs, use_container_width=True)
+
+    with anom_col:
+        fig_ts_anom = px.line(
+            df_ts,
+            x="DATE",
+            y="anomaly",
+            color="NAME",
+            markers=True,
+            labels={
+                "DATE": "Year",
+                "NAME": "Station",
+                "anomaly": f"Anomaly vs metro mean ({metric_axis_label})",
+            },
+            title=(
+                f"Anomaly vs metro mean for selected stations "
+                f"({metric_axis_label}, {year_range[0]}–{year_range[1]})"
+            ),
+        )
+        fig_ts_anom.add_hline(
+            y=0,
+            line_dash="dash",
+            line_color="white",
+            annotation_text="Metro mean",
+            annotation_position="top left",
+        )
+        fig_ts_anom.update_layout(height=500, margin=dict(l=10, r=10, t=60, b=10))
+        st.plotly_chart(fig_ts_anom, use_container_width=True)
 
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 4. Station-level trends (slopes) + distribution
+# 5. Station-level trends (slopes) + distribution
 # -----------------------------------------------------------------------------
 st.subheader(f"Short-term trends in {metric_axis_label.lower()}")
 
