@@ -413,83 +413,73 @@ st.markdown("---")
 
 # -----------------------------------------------------------------------------
 # 5. Geographic patterns – map view
-# -----------------------------------------------------------------------------
+
 st.subheader("Geographic pattern of station conditions")
 
-# Try to find latitude / longitude columns
-lat_col = None
-lon_col = None
-for c in ["LATITUDE", "Latitude", "lat", "LAT"]:
-    if c in df_filt.columns:
-        lat_col = c
-        break
-for c in ["LONGITUDE", "Longitude", "lon", "LON"]:
-    if c in df_filt.columns:
-        lon_col = c
-        break
+st.markdown(
+    """
+This map shows how each station compares to the metro-wide mean for the
+selected metric and period. Larger points indicate higher absolute values
+for the metric; colour encodes whether the station is above or below the
+metro mean.
+"""
+)
 
-if lat_col is None or lon_col is None:
+# Bring latitude/longitude onto the station summaries
+station_map = station_summary.merge(
+    df_filt[["STATION", "LATITUDE", "LONGITUDE"]]
+    .drop_duplicates("STATION"),
+    on="STATION",
+    how="left",
+)
+
+# Keep only rows with everything we need
+station_map = station_map.dropna(
+    subset=["LATITUDE", "LONGITUDE", metric_col, "delta_vs_metro"]
+)
+
+if station_map.empty:
     st.info(
-        "Latitude/longitude columns were not found in the dataset, "
-        "so the map view is disabled."
+        "No stations have both coordinate and metric data for this selection, "
+        "so the map cannot be drawn."
     )
 else:
-    # Aggregate to one row per station for the selected years
-    station_map = (
-        df_filt.groupby(["STATION", "NAME"], as_index=False)
-        .agg(
-            {
-                metric_col: "mean",
-                lat_col: "first",
-                lon_col: "first",
-            }
-        )
-        .rename(columns={lat_col: "LAT", lon_col: "LON"})
-    )
-    station_map["delta_vs_metro"] = station_map[metric_col] - metro_mean
-
-    center_lat = float(station_map["LAT"].mean())
-    center_lon = float(station_map["LON"].mean())
+    # Centre the map on the mean location of the filtered stations
+    center_lat = float(station_map["LATITUDE"].mean())
+    center_lon = float(station_map["LONGITUDE"].mean())
 
     fig_map = px.scatter_mapbox(
         station_map,
-        lat="LAT",
-        lon="LON",
-        size=metric_col,
+        lat="LATITUDE",
+        lon="LONGITUDE",
         color="delta_vs_metro",
-        color_continuous_scale="RdBu_r",
+        size=metric_col,              # now guaranteed non-NaN
         size_max=30,
-        zoom=7,
         hover_name="NAME",
         hover_data={
             metric_col: ":.2f",
             "delta_vs_metro": ":+.2f",
-            "LAT": False,
-            "LON": False,
         },
+        color_continuous_scale="RdBu_r",
+        color_continuous_midpoint=0,
+        zoom=7,
+        height=550,
         labels={
-            metric_col: metric_axis_label,
             "delta_vs_metro": f"Δ vs metro mean ({metric_axis_label})",
         },
         title=(
-            f"Spatial distribution of {metric_axis_label.lower()} "
+            f"Stations relative to metro mean {metric_axis_label.lower()} "
             f"({year_range[0]}–{year_range[1]})"
         ),
     )
+
     fig_map.update_layout(
         mapbox_style="open-street-map",
-        mapbox_center={"lat": center_lat, "lon": center_lon},
-        height=600,
         margin=dict(l=10, r=10, t=60, b=10),
     )
 
-    map_col1, map_col2 = st.columns([3, 2])
+    st.plotly_chart(fig_map, use_container_width=True)
 
-    with map_col1:
-        st.plotly_chart(fig_map, use_container_width=True)
-
-    with map_col2:
-        st.markdown(
             """
 **How to read this map**
 
