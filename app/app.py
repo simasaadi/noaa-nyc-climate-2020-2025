@@ -1,475 +1,354 @@
+# app/app.py
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from pathlib import Path
 
-# ---------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Page setup
+# -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="NOAA NYC Climate Explorer (2020–2025)",
+    page_title="NOAA NYC Climate Explorer",
     layout="wide",
 )
 
-# ---------------------------------------------------------------------
-# Data loading helpers
-# ---------------------------------------------------------------------
-@st.cache_data
-def load_data() -> pd.DataFrame:
-    """Load cleaned NOAA annual summary data for the NYC metro area."""
-    data_path = (
-        Path(__file__)
-        .resolve()
-        .parents[1]
-        / "data"
-        / "processed"
-        / "noaa_nyc_annual_clean.csv"
-    )
-    df = pd.read_csv(data_path)
-
-    # Ensure DATE is treated as year (int)
-    df["DATE"] = df["DATE"].astype(int)
-
-    # Standardize column names we will rely on
-    # (If any of these are missing, we simply skip those features later.)
-    return df
-
-
-@st.cache_data
-def compute_station_trends(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute simple linear trends per station for:
-      - Average annual temperature (TAVG)
-      - Number of very hot days (>= 90°F), if available
-    using a least-squares line fit (slope only).
-    """
-    rows = []
-    for name, g in df.groupby("NAME"):
-        years = g["DATE"].values
-
-        if len(np.unique(years)) < 3:
-            # Too few points for a meaningful trend
-            continue
-
-        # Temperature trend
-        if "TAVG" in g.columns:
-            tavg = g["TAVG"].values
-            slope_tavg = np.polyfit(years, tavg, 1)[0]
-        else:
-            slope_tavg = np.nan
-
-        # Hot days trend (>= 90°F), if we engineered that field
-        if "heat_extreme_days" in g.columns:
-            dx90 = g["heat_extreme_days"].values
-            slope_dx90 = np.polyfit(years, dx90, 1)[0]
-        else:
-            slope_dx90 = np.nan
-
-        rows.append(
-            {
-                "NAME": name,
-                "tavg_trend_per_year": slope_tavg,
-                "dx90_trend_per_year": slope_dx90,
-            }
-        )
-
-    trends = pd.DataFrame(rows)
-    return trends
-
-
-# ---------------------------------------------------------------------
-# Load data
-# ---------------------------------------------------------------------
-df = load_data()
-trends_df = compute_station_trends(df)
-
-min_year = int(df["DATE"].min())
-max_year = int(df["DATE"].max())
-
-# Some convenience lists for dropdowns
-station_names = sorted(df["NAME"].unique())
-
-metric_options = {
-    "Average temperature (TAVG, °F)": "TAVG",
-    "Total precipitation (PRCP, inches)": "PRCP",
-    "Total snowfall (SNOW, inches)": "SNOW",
-}
-
-extreme_options = {
-    "Very hot days ≥ 90°F": "heat_extreme_days",
-    "Very cold days ≤ 32°F": "cold_extreme_days",
-}
-
-# ---------------------------------------------------------------------
-# Sidebar – narrative + controls
-# ---------------------------------------------------------------------
-st.sidebar.title("NOAA NYC Climate Explorer")
-
-st.sidebar.markdown(
-    """
-This dashboard summarizes **annual climate conditions and trends** for weather
-stations in the **New York City metropolitan area** using a subset of the
-NOAA GSOM annual summaries (2020–2025).
-
-Use the controls below to focus on specific stations, years, and metrics.
-"""
-)
-
-year_range = st.sidebar.slider(
-    "Select year range",
-    min_value=min_year,
-    max_value=max_year,
-    value=(min_year, max_year),
-    step=1,
-)
-
-selected_metric_label = st.sidebar.selectbox(
-    "Primary climate metric for comparisons",
-    list(metric_options.keys()),
-)
-selected_metric = metric_options[selected_metric_label]
-
-selected_stations = st.sidebar.multiselect(
-    "Stations for detailed exploration",
-    station_names,
-    default=[
-        s
-        for s in station_names
-        if "CENTRAL PARK" in s or "JFK" in s or "NEWARK" in s
-    ],
-)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown(
-    """
-**How to read this app**
-
-- Start with the **Regional overview** tab to see which stations are
-  systematically warmer or wetter than others.
-- Use **Station explorer** to drill into any location's annual time series.
-- Open **Trends & extremes** to see where warming and very hot days are
-  increasing fastest.
-- The **Methods & notes** tab documents the dataset, basic processing steps,
-  and interpretation cautions.
-"""
-)
-
-# Filter the main dataframe by selected year range
-mask_year = (df["DATE"] >= year_range[0]) & (df["DATE"] <= year_range[1])
-df_year = df.loc[mask_year].copy()
-
-# ---------------------------------------------------------------------
-# Main title & description
-# ---------------------------------------------------------------------
-st.title("02 – Station Climate Profiles and Trends (NOAA NYC 2020–2025)")
+st.title("NOAA NYC Climate Explorer (2020–2025)")
 
 st.markdown(
     """
-This application turns the NOAA GSOM annual summaries for the NYC metro area
-into **station-level climate profiles and trend diagnostics**. The goal is not
-only to show interactive plots, but to tell a clear story about:
+This dashboard summarizes **annual climate conditions and short-term trends**
+for weather stations in the **New York City metropolitan area** using a subset
+of the NOAA GSOM annual summaries (2020–2025).
 
-- How conditions vary **across stations** (who is warmest, wettest, snowiest)
-- How conditions change **over time** (short-term trends in temperature and extremes)
-- What this implies for **urban climate risk** and **infrastructure planning**
+Use the controls in the sidebar to:
 
-Use the tabs below to move from high-level comparisons to station-level detail.
+- Pick the year range used for summaries and trend calculations.  
+- Select the primary climate metric for comparisons.  
+- Choose specific stations to examine in more detail.
 """
 )
 
-# ---------------------------------------------------------------------
-# Tabs
-# ---------------------------------------------------------------------
-tab_overview, tab_station, tab_trends, tab_methods = st.tabs(
-    ["Regional overview", "Station explorer", "Trends & extremes", "Methods & notes"]
+# -----------------------------------------------------------------------------
+# Data loading
+# -----------------------------------------------------------------------------
+@st.cache_data
+def load_data() -> pd.DataFrame:
+    """
+    Load the cleaned annual dataset produced by the notebooks.
+
+    Expected columns (at minimum):
+    - STATION, NAME, DATE (year)
+    - TAVG, PRCP, SNOW
+    - heat_extreme_days, cold_extreme_days (if available)
+    """
+    df = pd.read_csv("data/processed/noaa_nyc_annual_clean.csv")
+    # Make sure DATE is numeric
+    df["DATE"] = df["DATE"].astype(int)
+    return df
+
+
+df = load_data()
+
+year_min, year_max = int(df["DATE"].min()), int(df["DATE"].max())
+stations_all = df["NAME"].sort_values().unique()
+
+# -----------------------------------------------------------------------------
+# Sidebar controls
+# -----------------------------------------------------------------------------
+st.sidebar.header("Controls")
+
+year_range = st.sidebar.slider(
+    "Select year range",
+    min_value=year_min,
+    max_value=year_max,
+    value=(year_min, year_max),
 )
 
-# ---------------------------------------------------------------------
-# TAB 1 – Regional overview
-# ---------------------------------------------------------------------
-with tab_overview:
-    st.subheader("Regional climate ranking by station")
+metric_label = st.sidebar.selectbox(
+    "Primary climate metric",
+    [
+        "Average temperature (TAVG, °F)",
+        "Total precipitation (PRCP, inches)",
+        "Total snowfall (SNOW, inches)",
+        "Heat extreme days (heat_extreme_days)",
+        "Cold extreme days (cold_extreme_days)",
+    ],
+)
 
+# Map friendly labels to column names and axis labels
+METRIC_CONFIG = {
+    "Average temperature (TAVG, °F)": ("TAVG", "Average temperature (°F)"),
+    "Total precipitation (PRCP, inches)": ("PRCP", "Total precipitation (inches)"),
+    "Total snowfall (SNOW, inches)": ("SNOW", "Total snowfall (inches)"),
+    "Heat extreme days (heat_extreme_days)": ("heat_extreme_days", "Heat extreme days (≥ threshold)"),
+    "Cold extreme days (cold_extreme_days)": ("cold_extreme_days", "Cold extreme days (≤ threshold)"),
+}
+metric_col, metric_axis_label = METRIC_CONFIG[metric_label]
+
+# Filter years
+mask_years = (df["DATE"] >= year_range[0]) & (df["DATE"] <= year_range[1])
+df_filt = df.loc[mask_years].copy()
+
+# Some metrics may not exist in the file (e.g., heat_extreme_days)
+if metric_col not in df_filt.columns:
+    st.warning(
+        f"Column **`{metric_col}`** is not present in `noaa_nyc_annual_clean.csv`.\n\n"
+        "Switch to TAVG, PRCP, or SNOW, or add this column in your preprocessing step."
+    )
+
+stations_default = [
+    s for s in stations_all if "CENTRAL PARK" in s
+] or list(stations_all[:3])
+
+selected_stations = st.sidebar.multiselect(
+    "Stations for detailed exploration",
+    options=list(stations_all),
+    default=stations_default,
+)
+
+top_n = st.sidebar.slider(
+    "Number of stations in rankings",
+    min_value=5,
+    max_value=30,
+    value=15,
+)
+
+st.sidebar.markdown(
+    """
+Trends are computed for each station using a simple least-squares line fit over
+the selected year range. With only 6 years of data (2020–2025), treat these as
+**short-term signals**, not long-term climate normals.
+"""
+)
+
+# -----------------------------------------------------------------------------
+# Helper: compute station-level trends
+# -----------------------------------------------------------------------------
+def compute_station_trends(df_years: pd.DataFrame, col: str) -> pd.DataFrame:
+    """
+    Fit a linear trend for each station for the chosen metric over the given years.
+    Returns one row per station with a `slope` column (units of metric per year).
+    """
+    def slope_for_group(g: pd.DataFrame) -> float:
+        g = g.dropna(subset=[col])
+        if g.shape[0] < 3:
+            return np.nan
+        x = g["DATE"].values.astype(float)
+        y = g[col].values.astype(float)
+        m, _ = np.polyfit(x, y, 1)
+        return m
+
+    trend = (
+        df_years.groupby(["STATION", "NAME"], as_index=False)
+        .apply(slope_for_group)
+        .rename(columns={0: "slope"})
+    )
+    return trend
+
+
+# -----------------------------------------------------------------------------
+# 1. Overview KPIs
+# -----------------------------------------------------------------------------
+st.subheader("Overview for selected period")
+
+metro_series = df_filt.groupby("DATE", as_index=False)[metric_col].mean()
+metro_mean = metro_series[metric_col].mean()
+metro_first = metro_series.loc[metro_series["DATE"].idxmin(), metric_col]
+metro_last = metro_series.loc[metro_series["DATE"].idxmax(), metric_col]
+delta_val = metro_last - metro_first
+
+col1, col2, col3 = st.columns(3)
+col1.metric(
+    f"Metro-wide mean {metric_axis_label.lower()}",
+    f"{metro_mean:.2f}",
+)
+col2.metric(
+    f"Change in metro mean ({year_range[0]} → {year_range[1]})",
+    f"{delta_val:+.2f} per year-equivalent",
+)
+col3.metric(
+    "Number of stations with data",
+    f"{df_filt['STATION'].nunique()}",
+)
+
+st.markdown("---")
+
+# -----------------------------------------------------------------------------
+# 2. Ranking: Top N stations by metric
+# -----------------------------------------------------------------------------
+st.subheader(f"Station rankings by {metric_axis_label.lower()}")
+
+station_summary = (
+    df_filt.groupby(["STATION", "NAME"], as_index=False)[metric_col].mean()
+)
+station_summary["delta_vs_metro"] = station_summary[metric_col] - metro_mean
+
+top_ranked = (
+    station_summary.nlargest(top_n, metric_col).sort_values(metric_col)
+)
+
+rank_col1, rank_col2 = st.columns([3, 2])
+
+with rank_col1:
+    fig_rank = px.bar(
+        top_ranked,
+        x=metric_col,
+        y="NAME",
+        orientation="h",
+        color="delta_vs_metro",
+        color_continuous_scale="RdBu_r",
+        labels={
+            "NAME": "Station",
+            metric_col: metric_axis_label,
+            "delta_vs_metro": f"Δ vs metro mean ({metric_axis_label})",
+        },
+        title=(
+            f"Top {top_n} stations by {metric_axis_label.lower()} "
+            f"({year_range[0]}–{year_range[1]})"
+        ),
+        hover_data={"delta_vs_metro": ":+.2f"},
+    )
+    fig_rank.add_vline(
+        x=metro_mean,
+        line_dash="dash",
+        line_color="white",
+        annotation_text="Metro mean",
+        annotation_position="top right",
+    )
+    fig_rank.update_layout(height=550, margin=dict(l=10, r=10, t=60, b=10))
+    st.plotly_chart(fig_rank, use_container_width=True)
+
+with rank_col2:
     st.markdown(
-        f"""
-In this section we collapse the chosen period **{year_range[0]}–{year_range[1]}**
-into summary metrics by station. For the selected climate variable:
+        """
+**How to read this chart**
 
-- We compute the **mean** value over the chosen years for each station.
-- We then sort stations from highest to lowest and show the top locations.
+- Bars show the **mean value** for each station over the selected years.
+- Colour encodes how far each station is from the **metro-wide mean**:
+  - values above the mean are warmer/wetter/snowier (red shades),
+  - values below the mean are cooler/drier (blue shades).
+- The dashed vertical line marks the metro average.
 
-This gives a quick sense of which parts of the metro area are systematically
-warmer, wetter, or snowier than others.
+This gives a quick sense of which locations are systematic **hot spots**
+or **cold spots** for the chosen metric.
 """
     )
 
-    if selected_metric not in df_year.columns:
-        st.warning(
-            f"The column `{selected_metric}` is not present in the dataset. "
-            "Try a different metric."
-        )
-    else:
-        agg_func = "mean" if selected_metric == "TAVG" else "sum"
-        station_profiles = (
-            df_year.groupby(["NAME"], as_index=False)[selected_metric]
-            .agg(agg_func)
-            .rename(columns={selected_metric: "value"})
-        )
+st.markdown("---")
 
-        top_n = st.slider(
-            "Number of stations to display", 5, min(25, len(station_profiles)), 15
-        )
+# -----------------------------------------------------------------------------
+# 3. Time series for selected stations + metro mean
+# -----------------------------------------------------------------------------
+st.subheader("Year-to-year evolution")
 
-        top_profiles = station_profiles.sort_values("value", ascending=False).head(
-            top_n
-        )
+if not selected_stations:
+    st.info("Select at least one station in the sidebar to see time series.")
+else:
+    df_ts = df_filt[df_filt["NAME"].isin(selected_stations)].copy()
+    # metro mean as an additional "station"
+    metro_series_long = metro_series.copy()
+    metro_series_long["NAME"] = "Metro mean (all stations)"
+    df_ts_long = pd.concat(
+        [df_ts[["DATE", "NAME", metric_col]], metro_series_long[["DATE", "NAME", metric_col]]],
+        ignore_index=True,
+    )
 
-        fig_bar = px.bar(
-            top_profiles.sort_values("value"),
-            x="value",
+    fig_ts = px.line(
+        df_ts_long,
+        x="DATE",
+        y=metric_col,
+        color="NAME",
+        markers=True,
+        labels={
+            "DATE": "Year",
+            "NAME": "Station",
+            metric_col: metric_axis_label,
+        },
+        title=f"{metric_axis_label} by year for selected stations ({year_range[0]}–{year_range[1]})",
+    )
+    fig_ts.update_layout(height=500, margin=dict(l=10, r=10, t=60, b=10))
+    st.plotly_chart(fig_ts, use_container_width=True)
+
+st.markdown("---")
+
+# -----------------------------------------------------------------------------
+# 4. Station-level trends (slopes) + distribution
+# -----------------------------------------------------------------------------
+st.subheader(f"Short-term trends in {metric_axis_label.lower()}")
+
+trend_df = compute_station_trends(df_filt, metric_col)
+trend_valid = trend_df.dropna(subset=["slope"])
+
+if trend_valid.empty:
+    st.info(
+        "Not enough non-missing data to compute station-level trends for this "
+        "metric and year range."
+    )
+else:
+    warmest_trend = (
+        trend_valid.nlargest(top_n, "slope").sort_values("slope")
+    )
+
+    trend_col1, trend_col2 = st.columns([3, 2])
+
+    with trend_col1:
+        fig_trend_rank = px.bar(
+            warmest_trend,
+            x="slope",
             y="NAME",
             orientation="h",
-            labels={"value": selected_metric_label, "NAME": "Station"},
-            title=f"Top {top_n} stations by {selected_metric_label.lower()} "
-            f"({year_range[0]}–{year_range[1]})",
+            color="slope",
+            color_continuous_scale="Reds",
+            labels={
+                "NAME": "Station",
+                "slope": f"Trend in {metric_axis_label.lower()} per year",
+            },
+            title=(
+                f"Stations with strongest upward trend in "
+                f"{metric_axis_label.lower()} ({year_range[0]}–{year_range[1]})"
+            ),
         )
+        fig_trend_rank.add_vline(
+            x=0,
+            line_dash="dash",
+            line_color="white",
+            annotation_text="No trend",
+            annotation_position="top left",
+        )
+        fig_trend_rank.update_layout(height=550, margin=dict(l=10, r=10, t=60, b=10))
+        st.plotly_chart(fig_trend_rank, use_container_width=True)
 
-        fig_bar.update_layout(height=600, margin=dict(l=220, r=40, t=60, b=40))
-        st.plotly_chart(fig_bar, use_container_width=True)
-
+    with trend_col2:
         st.markdown(
             """
-**Interpretation tips**
+**What this shows**
 
-- Airports and coastal sites often look different from inland suburban stations.
-- For precipitation and snowfall, single outliers may reflect local convective storms.
-- Because we are working with only a few years (2020–2025), treat rankings as
-  **indicative**, not definitive climatology.
+- Each bar is the **slope of a linear regression** of the chosen metric vs. year
+  for one station.
+- Positive slopes indicate **increasing** values over the period
+  (warming, wetter conditions, more hot days, etc.).
+- The dashed vertical line at 0 marks "no trend".
+
+Because we only have **six years of data**, these slopes should be interpreted
+as **short-term signals** rather than robust long-term climate trends.
 """
         )
 
-# ---------------------------------------------------------------------
-# TAB 2 – Station explorer
-# ---------------------------------------------------------------------
-with tab_station:
-    st.subheader("Station explorer")
-
-    st.markdown(
-        """
-This view focuses on one or more stations and shows their **annual time series**
-for temperature and precipitation. Use it to compare how different locations in
-the metro area experienced the same period.
-"""
+    # Distribution of slopes
+    fig_hist = px.histogram(
+        trend_valid,
+        x="slope",
+        nbins=20,
+        labels={"slope": f"Trend in {metric_axis_label.lower()} per year"},
+        title=f"Distribution of station-level trends in {metric_axis_label.lower()}",
     )
-
-    if not selected_stations:
-        st.info("Select at least one station in the sidebar to see details.")
-    else:
-        df_sel = df[df["NAME"].isin(selected_stations)].copy()
-        df_sel = df_sel[(df_sel["DATE"] >= year_range[0]) & (df_sel["DATE"] <= year_range[1])]
-
-        # Temperature time series
-        if "TAVG" in df_sel.columns:
-            fig_t = px.line(
-                df_sel,
-                x="DATE",
-                y="TAVG",
-                color="NAME",
-                markers=True,
-                labels={"DATE": "Year", "TAVG": "Average temperature (°F)", "NAME": "Station"},
-                title="Average annual temperature by station",
-            )
-            fig_t.update_layout(height=450)
-            st.plotly_chart(fig_t, use_container_width=True)
-        else:
-            st.warning("Column `TAVG` is not available in this dataset.")
-
-        # Precipitation time series
-        if "PRCP" in df_sel.columns:
-            fig_p = px.line(
-                df_sel,
-                x="DATE",
-                y="PRCP",
-                color="NAME",
-                markers=True,
-                labels={"DATE": "Year", "PRCP": "Total precipitation (inches)", "NAME": "Station"},
-                title="Total annual precipitation by station",
-            )
-            fig_p.update_layout(height=450)
-            st.plotly_chart(fig_p, use_container_width=True)
-        else:
-            st.warning("Column `PRCP` is not available in this dataset.")
-
-        st.markdown(
-            """
-**What to look for**
-
-- Do core NYC stations (e.g., Central Park, JFK, Newark) track each other closely,
-  or do they diverge in certain years?
-- Are inland stations consistently cooler than coastal ones?
-- Do some stations show suspicious jumps that might indicate instrumentation or
-  siting changes rather than real climate signals?
-"""
-        )
-
-# ---------------------------------------------------------------------
-# TAB 3 – Trends & extremes
-# ---------------------------------------------------------------------
-with tab_trends:
-    st.subheader("Short-term warming and hot-day trends")
-
-    st.markdown(
-        """
-Here we estimate **simple linear trends** in:
-
-- Average annual temperature (**TAVG**, °F/year)
-- Number of **very hot days (≥ 90°F)** per year, where that derived variable is available
-
-Trends are calculated separately for each station using a least-squares line fit
-over the selected year range. With only 6 years of data (2020–2025), these
-should be interpreted as **short-term signals**, not long-term climate normals.
-"""
+    fig_hist.add_vline(
+        x=0,
+        line_dash="dash",
+        line_color="white",
+        annotation_text="No trend",
+        annotation_position="top left",
     )
-
-    # Recompute trends on the filtered year range so the slider actually matters
-    trends_year = compute_station_trends(df_year)
-
-    # Temperature trend bar chart
-    if not trends_year.empty and "tavg_trend_per_year" in trends_year.columns:
-        top_n_trend = st.slider(
-            "Number of stations to show in trend charts", 5, min(25, len(trends_year)), 15
-        )
-
-        # Warmest trend (largest positive slope)
-        warmers = trends_year.sort_values("tavg_trend_per_year", ascending=False).head(
-            top_n_trend
-        )
-
-        fig_trend_t = px.bar(
-            warmers.sort_values("tavg_trend_per_year"),
-            x="tavg_trend_per_year",
-            y="NAME",
-            orientation="h",
-            labels={
-                "tavg_trend_per_year": "Slope (°F per year)",
-                "NAME": "Station",
-            },
-            title=f"Stations with strongest warming trend in TAVG ({year_range[0]}–{year_range[1]})",
-        )
-        fig_trend_t.update_layout(height=600, margin=dict(l=220, r=40, t=60, b=40))
-        st.plotly_chart(fig_trend_t, use_container_width=True)
-    else:
-        st.info("Not enough data to compute temperature trends for this period.")
-
-    # Hot-day trend bar chart
-    if "dx90_trend_per_year" in trends_year.columns and not trends_year["dx90_trend_per_year"].isna().all():
-        st.markdown("---")
-        st.markdown("### Change in very hot days (≥ 90°F) per year")
-
-        hottest = trends_year.sort_values(
-            "dx90_trend_per_year", ascending=False
-        ).head(top_n_trend)
-
-        fig_trend_dx = px.bar(
-            hottest.sort_values("dx90_trend_per_year"),
-            x="dx90_trend_per_year",
-            y="NAME",
-            orientation="h",
-            labels={
-                "dx90_trend_per_year": "Slope (days ≥90°F per year)",
-                "NAME": "Station",
-            },
-            title="Stations with strongest increase in very hot days",
-        )
-        fig_trend_dx.update_layout(height=600, margin=dict(l=220, r=40, t=60, b=40))
-        st.plotly_chart(fig_trend_dx, use_container_width=True)
-    else:
-        st.info(
-            "Derived field `heat_extreme_days` was not found or does not contain enough data "
-            "to compute trends in hot days."
-        )
-
-    st.markdown(
-        """
-**How to read these charts**
-
-- Positive slopes indicate **warming** or **more hot days** over the period.
-- Negative slopes indicate cooling or fewer hot days (often not statistically
-  meaningful over such a short window).
-- Compare stations rather than obsessing over the exact numerical value of the slope.
-"""
-    )
-
-# ---------------------------------------------------------------------
-# TAB 4 – Methods & notes
-# ---------------------------------------------------------------------
-with tab_methods:
-    st.subheader("Methods, caveats, and extensions")
-
-    st.markdown(
-        f"""
-### Dataset
-
-- Source: NOAA Global Summary of the Year (GSOM/GSOD Annual Summary)
-- Region: New York City metropolitan area
-- Period: **{min_year}–{max_year}**
-- Spatial unit: individual weather stations (NAME / STATION)
-
-The cleaned dataset used in this app is stored as
-`data/processed/noaa_nyc_annual_clean.csv` in the GitHub repository.
-"""
-    )
-
-    st.markdown(
-        """
-### Key variables
-
-- **TAVG** – Average temperature over the year (°F)
-- **TMAX / TMIN** – Mean of daily maxima / minima (°F)
-- **PRCP** – Total annual precipitation (inches)
-- **SNOW** – Total annual snowfall (inches)
-- **heat_extreme_days** – Engineered: count of days with TMAX ≥ 90°F (if available)
-- **cold_extreme_days** – Engineered: count of days with very cold conditions (if available)
-
-Additional engineered indices (degree-days, wetness index, etc.) can be layered
-into future versions of the dashboard.
-"""
-    )
-
-    st.markdown(
-        """
-### Trend estimation
-
-For each station, trends are estimated with a simple **least-squares linear fit**:
-
-- Slope of TAVG vs. year → °F change per year
-- Slope of `heat_extreme_days` vs. year → change in number of very hot days per year
-
-This is intentionally lightweight and transparent, but it has limitations:
-
-- Only **six years** of data (2020–2025) → results are sensitive to individual years
-- No adjustment for autocorrelation, step changes, or inhomogeneities
-- No spatial smoothing across stations
-
-The goal is to provide **directional insight**, not formal climate attribution.
-"""
-    )
-
-    st.markdown(
-        """
-### Possible extensions
-
-If this project is extended for a more advanced portfolio piece, next steps
-could include:
-
-- Adding **degree-day** and **wetness index** visualizations for energy/water planning
-- Incorporating **station metadata** (urban vs. rural, elevation, land cover)
-- Exporting a formal **technical report** with all figures and summary tables
-- Connecting the app to a **larger historical window** (e.g., 1980–present) for robust trends
-
-For now, the dashboard demonstrates the ability to go from raw NOAA data to a
-**fully documented, interactive climate analytics product** suitable for
-stakeholders and hiring managers.
-"""
-    )
+    fig_hist.update_layout(height=400, margin=dict(l=10, r=10, t=60, b=10))
+    st.plotly_chart(fig_hist, use_container_width=True)
