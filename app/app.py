@@ -411,12 +411,10 @@ as **short-term signals** rather than robust long-term climate trends.
 
 st.markdown("---")
 
+
 # -----------------------------------------------------------------------------
 # 5. Geographic patterns – map view
-
-# -------------------------------------------------------------------------
-# 5. Geographic pattern – map view
-# -------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 st.subheader("Geographic pattern of station conditions")
 
 st.markdown(
@@ -482,8 +480,8 @@ else:
 
     st.plotly_chart(fig_map, use_container_width=True)
 
-
-            """
+    st.markdown(
+        """
 **How to read this map**
 
 - Each point is a **weather station** in the NYC metropolitan area  
@@ -494,4 +492,5 @@ else:
 This helps you see whether hot/wet/snowy outliers are spatially clustered or
 spread across the region.
 """
-        )
+    )
+
