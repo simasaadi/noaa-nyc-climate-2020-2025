@@ -414,6 +414,9 @@ st.markdown("---")
 # -----------------------------------------------------------------------------
 # 5. Geographic patterns – map view
 
+# -------------------------------------------------------------------------
+# 5. Geographic pattern – map view
+# -------------------------------------------------------------------------
 st.subheader("Geographic pattern of station conditions")
 
 st.markdown(
@@ -427,13 +430,12 @@ metro mean.
 
 # Bring latitude/longitude onto the station summaries
 station_map = station_summary.merge(
-    df_filt[["STATION", "LATITUDE", "LONGITUDE"]]
-    .drop_duplicates("STATION"),
+    df_filt[["STATION", "LATITUDE", "LONGITUDE"]].drop_duplicates("STATION"),
     on="STATION",
     how="left",
 )
 
-# Keep only rows with everything we need
+# Keep only rows with everything we need (avoid NaNs in size/colour)
 station_map = station_map.dropna(
     subset=["LATITUDE", "LONGITUDE", metric_col, "delta_vs_metro"]
 )
@@ -453,7 +455,7 @@ else:
         lat="LATITUDE",
         lon="LONGITUDE",
         color="delta_vs_metro",
-        size=metric_col,              # now guaranteed non-NaN
+        size=metric_col,
         size_max=30,
         hover_name="NAME",
         hover_data={
@@ -479,6 +481,7 @@ else:
     )
 
     st.plotly_chart(fig_map, use_container_width=True)
+
 
             """
 **How to read this map**
