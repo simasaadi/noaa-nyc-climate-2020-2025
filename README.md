@@ -2,10 +2,8 @@ NOAA NYC Climate Explorer (2020–2025)
 
 Short-term climate analysis of NOAA GSOM annual summaries for NYC-area weather stations. The project focuses on temperature, precipitation, and snowfall variability across the region and delivers a full interactive dashboard built with Streamlit and Plotly.
 
-🚀 Live Dashboard
 
-
-Click to open the interactive NYC climate dashboard.
+🚀 Live Dashboard [![Streamlit App](https://img.shields.io/badge/Streamlit-Live%20App-red?logo=streamlit)](https://noaa-nyc-climate-2020-2025-7oa3p73mp5j3uxpeawrxnm.streamlit.app/) Click the button above to open the fully interactive NYC climate dashboard.
 
 Overview
 
