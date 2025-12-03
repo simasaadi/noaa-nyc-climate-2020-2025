@@ -4,7 +4,9 @@ Short-term climate analysis of NOAA GSOM annual summaries for NYC-area weather s
 
 
 🚀 Live Dashboard
-[![Streamlit App](https://img.shields.io/badge/Streamlit-Live%20App-red?logo=streamlit)](https://noaa-nyc-climate-2020-2025-7oa3p73mp5j3uxpeawrxnm.streamlit.app/) Click the button above to open the fully interactive NYC climate dashboard.
+[![Streamlit App](https://img.shields.io/badge/Streamlit-Live%20App-red?logo=streamlit)](https://noaa-nyc-climate-2020-2025-7oa3p73mp5j3uxpeawrxnm.streamlit.app/) 
+
+Click the button above to open the fully interactive NYC climate dashboard.
 
 Overview
 
