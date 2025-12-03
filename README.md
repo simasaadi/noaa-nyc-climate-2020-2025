@@ -1,237 +1,60 @@
-# noaa-nyc-climate-2020-2025
-Exploratory climate analysis of NOAA GSOM annual summaries for the NYC metro area (2020–2025).
-
 NOAA NYC Climate Explorer (2020–2025)
-This project analyzes short-term climate conditions and trends across weather stations in the New York City metropolitan area using annual summaries from the NOAA GSOM dataset (2020–2025).
 
-## 🚀 Live Dashboard
+Short-term climate analysis of NOAA GSOM annual summaries for NYC-area weather stations. The project focuses on temperature, precipitation, and snowfall variability across the region and delivers a full interactive dashboard built with Streamlit and Plotly.
 
-[![Streamlit App](https://img.shields.io/badge/Streamlit-Live%20App-red?logo=streamlit)](https://noaa-nyc-climate-2020-2025-7oa3p73mp5j3uxpeawrxnm.streamlit.app/)
-
-Click the button above to open the fully interactive NYC climate dashboard.
-
-It combines a clean end-to-end workflow:
-
-- Reproducible data cleaning  
-- Exploratory analysis notebooks  
-- Station-level climate profiling  
-- Trend estimation  
-- A full interactive Streamlit dashboard  
-- Clear documentation  
-
-The result is a compact but professional climate-intelligence tool that helps identify hot spots, wet spots, outliers, and short-term warming signals across the NYC metro area.
+🚀 Live Dashboard
 
 
-Project Overview
+Click to open the interactive NYC climate dashboard.
 
-This repository contains:
+Overview
 
-Processed NOAA climate data for all stations with valid 2020–2025 annual summaries
+This repository includes a clean workflow from data preparation to visualization:
 
-A series of analysis notebooks that build station profiles, compute metrics, and derive trends
+Processed NOAA GSOM data (2020–2025)
 
-A fully interactive Streamlit dashboard (published online)
+Jupyter notebooks for EDA, profiling, and short-term trend estimation
 
-A clean project structure that mirrors typical analytics or research workflows
+A Streamlit dashboard with metric filters, station rankings, time-series views, and a geo-spatial map
 
-The project can serve as:
+Plotly-based visuals for interactive exploration
 
-A portfolio piece demonstrating strong data-analysis, visualization, and dashboarding skills
+This project is structured as a focused, end-to-end analytics workflow that works well for both research and portfolio presentation.
 
-A climate-monitoring tool for researchers, planners, or data-driven teams
-
-A foundation for longer-term climate-risk analysis
-
-Live Dashboard
-
-Explore the interactive app:
-
-➡ NOAA NYC Climate Explorer (Streamlit App)
-
-Link: https://noaa-nyc-climate-2020-2025.streamlit.app/
-(Replace with your actual app link)
-
-Features of the dashboard:
-
-Year-range filtering (2020–2025)
-
-Multiple climate metrics (temperature, precipitation, snowfall, extremes)
-
-Station rankings with heat-map style encoding
-
-Time-series comparisons vs metro mean
-
-Station-level trend estimation
-
-Interactive map view showing spatial climate patterns
 Repository Structure
 noaa-nyc-climate-2020-2025/
 │
 ├── data/
-│   ├── raw/                       # Original downloaded NOAA data (optional)
 │   ├── processed/
-│   │   └── noaa_nyc_annual_clean.csv
-│   └── noaa_nyc_annual_2020_2025.csv
+│   └── raw/ (optional)
 │
 ├── notebooks/
-│   ├── 01_eda_noaa_nyc.ipynb      # Initial EDA and data checks
+│   ├── 01_eda_noaa_nyc.ipynb
 │   └── 02_station_profiles_and_trends.ipynb
 │
 ├── app/
-│   ├── app.py                     # Streamlit dashboard
-│   ├── requirements.txt           # Deployment dependencies
+│   ├── app.py
+│   ├── requirements.txt
 │
-├── src/                           # Utility scripts (optional)
-│
-├── README.md
-└── LICENSE (optional)
-Data Source
+└── README.md
 
-All data in this project comes from the
-NOAA Global Summary of the Month (GSOM) dataset.
+Data & Methods
 
-Dataset used:
+Data Source: NOAA Global Summary of the Month (GSOM).
+Coverage: NY + NJ stations with complete 2020–2025 records.
 
-NYC metro stations (NY + NJ)
+Methods used:
 
-2020–2025 annual summaries
+Data cleaning and validation
 
-Variables include:
+Multi-year station profiles
 
-Average temperature (°F)
+Simple linear trend estimation (temperature, precipitation, snowfall)
 
-Total precipitation (inches)
+Spatial comparison using station coordinates
 
-Total snowfall (inches)
+Interactive dashboard development with Streamlit + Plotly
 
-Heat/cold extreme days (if present)
-
-Lat/long, station IDs, station names
-
-This project does not modify NOAA data beyond:
-
-Cleaning invalid records
-
-Aligning column names
-
-Aggregating annual metrics
-
-Methodology
-1. Data Cleaning
-
-Performed in 01_eda_noaa_nyc.ipynb:
-
-Validate NOAA fields and units
-
-Harmonize column names across stations
-
-Remove corrupted/incomplete rows
-
-Filter to stations with full 2020–2025 coverage
-
-Export a clean annual dataset
-
-2. Station Climate Profiles
-
-In 02_station_profiles_and_trends.ipynb:
-
-Compute multi-year averages for:
-
-Temperature
-
-Precipitation
-
-Snowfall
-
-Extreme heat/cold days (if available)
-
-Rank stations relative to the metro average
-
-Compute differences (e.g., hotter/cooler, wetter/drier)
-
-3. Trend Estimation
-4. A simple linear regression is applied for each station:
-
-y = m*x + b
-slope = m
-Interpreted as:
-
-°F per year (for temperature)
-
-inches per year (precipitation/snowfall)
-
-With only 6 years of data, these are treated as short-term signals, not long-term climate trends.
-
-4. Dashboard Development
-
-The Streamlit app integrates:
-
-Multi-metric control panel
-
-Station ranking visualizations (heatmap bars)
-
-Year-to-year time series
-
-Trend distribution histograms
-
-A map visualizing geographic patterns
-
-All plots use Plotly for interactivity.
-
-Key Findings (Example – adjust after reviewing your dashboard)
-
-Several NYC metro stations show persistent warm anomalies above the regional mean.
-
-A small cluster of stations in central NJ demonstrates slightly stronger short-term warming signals.
-
-Precipitation varies widely across the region, with coastal stations often wetter than inland ones.
-
-Year-to-year temperature variability is highly synchronized across stations, suggesting strong regional forcing.
-
-Running the Project Locally
-1. Clone the repository
-git clone https://github.com/simasaadi/noaa-nyc-climate-2020-2025.git
-cd noaa-nyc-climate-2020-2025
-
-2. Create environment + install dependencies
+Run Locally
 pip install -r app/requirements.txt
-
-3. Run the Streamlit app
 streamlit run app/app.py
-
-
-The dashboard will open in your browser.
-
-Skills Demonstrated
-
-This project highlights expertise in:
-
-Data cleaning and preprocessing
-
-EDA for environmental datasets
-
-Time-series analysis
-
-Trend modelling and regression
-
-Interactive dashboards (Streamlit + Plotly)
-
-Multi-station spatial analysis
-
-Project structuring and documentation
-
-Communicating climate insights to technical and non-technical audiences
-
-Future Work
-
-Potential extensions:
-
-Incorporate long-term NOAA normals (30-year)
-
-Add seasonal breakdowns
-
-Integrate air quality or humidity data
-
-Apply clustering to group similar station profiles
-
-Automate data refresh using NOAA API
